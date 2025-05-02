@@ -1,0 +1,8 @@
+#!/bin/bash
+
+export HOST=$(hostnamectl --static)
+for file in ./group/$HOST/*; do
+    echo "installing $file"
+    sudo pacman -D --asexplicit - < "$file"
+    paru -S --asexplicit --needed - < "$file"
+done

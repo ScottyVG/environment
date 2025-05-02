@@ -1,0 +1,6 @@
+efibootmgr
+nvidia-dkms
+nvidia-utils
+usbutils
+zram-generator
+
