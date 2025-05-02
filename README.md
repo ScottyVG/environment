@@ -1,7 +1,7 @@
 # environment
 
 ## packages/install
-[<0;15;18M
+
 This is a bash script that automates the installation of packages listed in files located in a directory corresponding to the hostname of the system. Here’s a breakdown of the command:
 
 ### 1. `#!/bin/bash`
@@ -47,6 +47,60 @@ This marks the end of the `for` loop. The script will continue to the next file 
 
 This script is automating the installation of packages listed in files that are located in a folder named after the system's hostname. It uses `pacman` for native Arch Linux packages and `paru` for AUR packages, ensuring that each package is explicitly installed and only installed if needed.
 
+## symlinks stuff
+
+**Clarifying symlink request**
+
+The user seems to want to symlink the `base` file inside `nc-1701-d` to `../base`. To do this correctly, I would remove the current file and create a symlink:
+
+```bash
+cd group
+rm nc-1701-d/base
+ln -s ../base nc-1701-d/base
+```
+
+They also mentioned the `host` file, and while it's a bit unclear, it seems like they want to symlink that too. Since they specifically referred to the `base` file, my guess is they want to symlink that first. Let me keep an eye on that!
+
+
+Thought for a few seconds
+
+
+From inside your `group/nc-1701-d/` directory just replace that tiny `base` file with a symlink back to the real one:
+
+```bash
+cd group/nc-1701-d/
+rm base
+ln -s ../base base
+```
+
+Now if you do:
+
+```bash
+ls -l group/nc-1701-d/
+```
+
+you’ll see:
+
+```bash
+base -> ../base
+host
+```
+
+and when your script loops over `./group/$HOST/*` it will pick up the symlinked `base`, which transparently points to the single `group/base` file. Any edits you make in `group/base` will automatically be seen under `group/nc-1701-d/base`.
+
+```
+[scotty@ncc-1701-d nc-1701-d]$ ln -s ../base base
+[scotty@ncc-1701-d nc-1701-d]$ ls -l group/nc-1701-d
+ls: cannot access 'group/nc-1701-d': No such file or directory
+[scotty@ncc-1701-d nc-1701-d]$ ..
+bash: ..: command not found
+[scotty@ncc-1701-d nc-1701-d]$ cd ..
+[scotty@ncc-1701-d group]$ cd ..
+[scotty@ncc-1701-d packages]$ ls -l group/nc-1701-d
+total 4
+lrwxrwxrwx 1 scotty scotty  7 May  1 20:20 base -> ../base
+-rw-r--r-- 1 scotty scotty 61 May  1 19:59 host
+```
 
 ## dotfiles/install
 
