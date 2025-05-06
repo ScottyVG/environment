@@ -1,9 +1,14 @@
 aws-cli-v2-bin
 aws-session-manager-plugin
 awslogs
+baobab
+base
 base-devel
+brave-bin
+dkms
 docker
 docker-compose
+dolphin
 ghostty
 github-cli
 go
@@ -29,8 +34,4 @@ unzip
 wget
 yq
 zsh
-baobab
-base
-brave-bin
-dkms
-dolphin
+zulu-21-bin
