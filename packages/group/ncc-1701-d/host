@@ -4,3 +4,6 @@ nvidia-utils
 usbutils
 zram-generator
 
+intel-ucode
+libva-nvidia-driver
+smartmontools
