@@ -3,7 +3,7 @@
 ## Change hostname
 
 ```sh
-sudo vim /etc/hostname
+sudo vi /etc/hostname
 ```
 
 ### Shipnames
