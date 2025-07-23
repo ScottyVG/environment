@@ -26,5 +26,5 @@ for file in "$GROUP"/*; do
   sudo pacman -Sy --needed --noconfirm - < "$file" || true
 
   echo "📦 [AUR] Installing from $file…"
-  $AUR_HELPER -S --needed --asexplicit - < "$file"
+  $AUR_HELPER -S --needed --asexplicit --noconfirm - < "$file"
 done

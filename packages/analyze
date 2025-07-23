@@ -2,15 +2,24 @@
 set -e
 
 packages=$(pacman -Qe | awk '{print $1}')
-export HOST=$(hostname)
+export HOST=$(cat /proc/sys/kernel/hostname)
+
+if [ ! -d "./group/$HOST" ]; then
+    echo "Error: Directory ./group/$HOST does not exist"
+    echo "Please create the directory structure for hostname: $HOST"
+    exit 1
+fi
+
 echo "scanning ./group/$HOST"
 
 for pkg in $packages; do
     found=false
     for file in ./group/$HOST/*; do
-        if grep -q "^$pkg$" "$file"; then
-            found=true
-            break
+        if [ -f "$file" ]; then
+            if grep -q "^$pkg$" "$file"; then
+                found=true
+                break
+            fi
         fi
     done
     
@@ -21,7 +30,12 @@ for pkg in $packages; do
         echo "2. Remove"
         
         # Dynamically list group files
-        group_files=(./group/$HOST/*)
+        group_files=()
+        for f in ./group/$HOST/*; do
+            if [ -f "$f" ]; then
+                group_files+=("$f")
+            fi
+        done
         for i in "${!group_files[@]}"; do
             echo "$((i+3)). Add to ${group_files[$i]##*/}"
         done
