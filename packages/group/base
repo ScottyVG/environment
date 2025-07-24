@@ -1,6 +1,7 @@
-aws-cli-v2-bin
 aws-session-manager-plugin
 awslogs
+base
+base-devel
 docker
 docker-compose
 git
@@ -13,7 +14,6 @@ neovim
 npm
 oh-my-zsh-git
 paru
-paru-debug
 python
 ripgrep
 rsync
@@ -28,5 +28,3 @@ vim
 wget
 yq
 zsh
-base
-base-devel

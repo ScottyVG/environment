@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 
-# Homebrew
-alias bb="brew bundle --File=~/Brewfile"
+# Arch
+alias sd="sudo shutdown now"
 
 # Easier navigation: .., ..., ...., ....., ......, ~ and -
 alias ..="cd .."
@@ -59,23 +59,6 @@ v() {
     nvim "$@"
   fi
 }
-alias va="nvim ~/workspace/agenda.org"
-
-# Show/hide hidden files in Finder
-alias show="defaults write com.apple.finder AppleShowAllFiles -bool true && killall Finder"
-alias hide="defaults write com.apple.finder AppleShowAllFiles -bool false && killall Finder"
-
-# Hide/show all desktop icons (useful when presenting)
-alias hidedesktop="defaults write com.apple.finder CreateDesktop -bool false && killall Finder"
-alias showdesktop="defaults write com.apple.finder CreateDesktop -bool true && killall Finder"
-
-# Disable Spotlight
-alias spotoff="sudo mdutil -a -i off"
-# Enable Spotlight
-alias spoton="sudo mdutil -a -i on"
-
-# Lock the screen (when going AFK)
-alias afk="/System/Library/CoreServices/Menu\ Extras/User.menu/Contents/Resources/CGSession -suspend"
 
 # Reload the shell (i.e. invoke as a login shell)
 alias reload="exec ${SHELL} -l"
@@ -96,35 +79,3 @@ alias h='history 20'
 
 # File size
 alias fs="stat -f \"%z bytes\""
-
-# Empty the Trash on all mounted volumes and the main HDD. then clear the useless sleepimage
-alias emptytrash=" \
-    sudo rm -rfv /Volumes/*/.Trashes; \
-    rm -rfv ~/.Trash/*; \
-    sudo rm -v /private/var/vm/sleepimage; \
-    rm -rv \"/Users/scottvg/Library/Application Support/stremio/Cache\";  \
-    rm -rv \"/Users/scottvg/Library/Application Support/stremio/stremio-cache\" \
-"
-
-# Brew
-alias bud='brew update && brew doctor'
-
-###
-# GIT STUFF
-alias ga="git add"
-alias gs="git status"
-alias gc="git commit"
-alias gch="git checkout"
-alias gp="git push origin"
-alias gr="git pull --rebase origin"
-alias gb="git branch"
-alias lines="git ls-files | xargs cat | wc -l"
-# alias logx='git log --graph --oneline --all'
-# alias gits='git status'
-
-# dotfiles + git
-# from https://developer.atlassian.com/blog/2016/02/best-way-to-store-dotfiles-git-bare-repo/
-alias dotfiles='/usr/bin/git --git-dir=$HOME/.dotfiles --work-tree=$HOME'
-# dotfiles config --local status.showUntrackedFiles no
-alias dfs='dotfiles status'
-
