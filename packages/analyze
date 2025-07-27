@@ -1,66 +1,182 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
+# Configuration
+export HOST=$(hostnamectl --static 2>/dev/null || cat /proc/sys/kernel/hostname)
+GROUP_DIR="./group/$HOST"
+LOG_FILE="/tmp/package-analyze-$(date +%Y%m%d-%H%M%S).log"
+
+# Logging function
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
+}
+
+# Get explicitly installed packages
 packages=$(pacman -Qe | awk '{print $1}')
-export HOST=$(cat /proc/sys/kernel/hostname)
+total_packages=$(echo "$packages" | wc -w)
+processed=0
+skipped=0
+removed=0
+added=0
 
-if [ ! -d "./group/$HOST" ]; then
-    echo "Error: Directory ./group/$HOST does not exist"
-    echo "Please create the directory structure for hostname: $HOST"
+log "🔍 Starting package analysis for host '$HOST'"
+log "📝 Log file: $LOG_FILE"
+log "📦 Found $total_packages explicitly installed packages"
+
+# Check if group directory exists
+if [[ ! -d "$GROUP_DIR" ]]; then
+    log "❌ Directory $GROUP_DIR does not exist"
+    echo "Creating directory structure for hostname: $HOST"
+    mkdir -p "$GROUP_DIR"
+    
+    # Create default files if they don't exist
+    touch "$GROUP_DIR/base" "$GROUP_DIR/host"
+    log "✅ Created default base and host files in $GROUP_DIR"
+fi
+
+log "🔍 Scanning $GROUP_DIR"
+
+# Get list of group files
+group_files=()
+for f in "$GROUP_DIR"/*; do
+    if [[ -f "$f" ]]; then
+        group_files+=("$f")
+    fi
+done
+
+if [[ ${#group_files[@]} -eq 0 ]]; then
+    log "❌ No group files found in $GROUP_DIR"
     exit 1
 fi
 
-echo "scanning ./group/$HOST"
+log "📁 Found ${#group_files[@]} group files: $(printf '%s ' "${group_files[@]##*/}")"
 
-for pkg in $packages; do
-    found=false
-    for file in ./group/$HOST/*; do
-        if [ -f "$file" ]; then
-            if grep -q "^$pkg$" "$file"; then
-                found=true
-                break
-            fi
+# Function to check if package exists in any group file
+package_exists() {
+    local pkg="$1"
+    for file in "${group_files[@]}"; do
+        if grep -q "^$pkg$" "$file" 2>/dev/null; then
+            return 0
         fi
     done
+    return 1
+}
+
+# Function to add package to file (avoiding duplicates)
+add_package_to_file() {
+    local pkg="$1"
+    local file="$2"
     
-    if ! $found; then
-        echo "Package '$pkg' not found in any group file."
-        echo "Options:"
-        echo "1. Skip"
-        echo "2. Remove"
-        
-        # Dynamically list group files
-        group_files=()
-        for f in ./group/$HOST/*; do
-            if [ -f "$f" ]; then
-                group_files+=("$f")
-            fi
-        done
-        for i in "${!group_files[@]}"; do
-            echo "$((i+3)). Add to ${group_files[$i]##*/}"
-        done
-        
-        read -p "Enter your choice (1-$((${#group_files[@]}+2))): " choice
+    if ! grep -q "^$pkg$" "$file" 2>/dev/null; then
+        echo "$pkg" >> "$file"
+        # Sort and remove duplicates
+        sort -u "$file" -o "$file"
+        log "✅ Added '$pkg' to ${file##*/}"
+        return 0
+    else
+        log "⚠️  Package '$pkg' already exists in ${file##*/}"
+        return 1
+    fi
+}
+
+# Process each package
+for pkg in $packages; do
+    ((processed++))
+    
+    if package_exists "$pkg"; then
+        continue
+    fi
+    
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📦 Package '$pkg' not found in any group file ($processed/$total_packages)"
+    
+    # Show package info
+    if pacman -Qi "$pkg" &>/dev/null; then
+        echo "📋 Description: $(pacman -Qi "$pkg" | grep '^Description' | cut -d: -f2- | sed 's/^ *//')"
+        echo "📏 Size: $(pacman -Qi "$pkg" | grep '^Installed Size' | cut -d: -f2- | sed 's/^ *//')"
+    fi
+    
+    echo ""
+    echo "Options:"
+    echo "1. Skip (leave unmanaged)"
+    echo "2. Remove (mark as dependency)"
+    echo "3. Auto-add to 'base' (common packages)"
+    echo "4. Auto-add to 'host' (host-specific packages)"
+    
+    # List group files for manual selection
+    for i in "${!group_files[@]}"; do
+        echo "$((i+5)). Add to ${group_files[$i]##*/}"
+    done
+    
+    echo "q. Quit analysis"
+    echo ""
+    
+    while true; do
+        read -p "Enter your choice (1-$((${#group_files[@]}+4)), q): " choice
         
         case $choice in
             1)
-                echo "Skipped '$pkg'"
+                echo "⏭️  Skipped '$pkg'"
+                ((skipped++))
+                break
                 ;;
             2)
-                sudo pacman -D --asdeps "$pkg"
-                echo "Removed '$pkg'"
+                if sudo pacman -D --asdeps "$pkg" 2>/dev/null; then
+                    echo "🗑️  Marked '$pkg' as dependency"
+                    log "🗑️  Marked '$pkg' as dependency"
+                    ((removed++))
+                else
+                    echo "❌ Failed to mark '$pkg' as dependency"
+                fi
+                break
+                ;;
+            3)
+                if add_package_to_file "$pkg" "$GROUP_DIR/base"; then
+                    ((added++))
+                fi
+                break
+                ;;
+            4)
+                if add_package_to_file "$pkg" "$GROUP_DIR/host"; then
+                    ((added++))
+                fi
+                break
+                ;;
+            q|Q)
+                echo "🛑 Analysis stopped by user"
+                break 2
                 ;;
             *)
-                if [ "$choice" -ge 3 ] && [ "$choice" -le $((${#group_files[@]}+2)) ]; then
-                    selected_file="${group_files[$((choice-3))]}"
-                    echo "$pkg" >> "$selected_file"
-                    echo "Added '$pkg' to ${selected_file##*/}"
+                if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 5 ]] && [[ "$choice" -le $((${#group_files[@]}+4)) ]]; then
+                    selected_file="${group_files[$((choice-5))]}"
+                    if add_package_to_file "$pkg" "$selected_file"; then
+                        ((added++))
+                    fi
+                    break
                 else
-                    echo "Invalid choice. Skipped '$pkg'"
+                    echo "❌ Invalid choice. Please try again."
                 fi
                 ;;
         esac
-        echo "----------------------------------------"
-    fi
+    done
+done
+
+# Summary
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log "📊 Analysis Summary:"
+log "📦 Total packages processed: $processed"
+log "✅ Packages added to groups: $added"
+log "⏭️  Packages skipped: $skipped"
+log "🗑️  Packages marked as dependencies: $removed"
+log "📝 Full log available at: $LOG_FILE"
+
+# Show group file contents
+echo ""
+echo "📁 Current group file contents:"
+for file in "${group_files[@]}"; do
+    count=$(grep -c '^[^[:space:]]*$' "$file" 2>/dev/null || echo 0)
+    echo "  ${file##*/}: $count packages"
 done
 

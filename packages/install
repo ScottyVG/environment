@@ -4,27 +4,163 @@ shopt -s nullglob
 
 export HOST=$(hostnamectl --static)
 GROUP="./group/${HOST}"
+LOG_FILE="/tmp/package-install-$(date +%Y%m%d-%H%M%S).log"
+
+# Logging function
+log() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
+}
+
+# Error handling function
+handle_error() {
+  local exit_code=$1
+  local command="$2"
+  log "❌ Command failed with exit code $exit_code: $command"
+  return $exit_code
+}
+
+# Function to resolve package conflicts
+resolve_conflicts() {
+  local package_list="$1"
+  local temp_file=$(mktemp)
+  
+  log "🔍 Checking for package conflicts..."
+  
+  # Check for conflicts before installing
+  if sudo pacman -S --print --needed - < "$package_list" 2>&1 | grep -q "are in conflict"; then
+    log "⚠️  Package conflicts detected. Attempting to resolve..."
+    
+    # Extract conflicting packages and try to remove old versions
+    sudo pacman -S --print --needed - < "$package_list" 2>&1 | \
+      grep "are in conflict" | \
+      sed -n 's/.*:: \([^ ]*\) and \([^ ]*\) are in conflict.*/\1\n\2/p' | \
+      while read -r pkg; do
+        if [[ -n "$pkg" ]]; then
+          log "🗑️  Removing conflicting package: $pkg"
+          sudo pacman -Rdd --noconfirm "$pkg" 2>/dev/null || log "⚠️  Could not remove $pkg (may not be installed)"
+        fi
+      done
+  fi
+  
+  rm -f "$temp_file"
+}
+
+# Function to clean package list (remove empty lines and comments)
+clean_package_list() {
+  local package_list="$1"
+  local temp_file=$(mktemp)
+  
+  # Remove empty lines, comments, and trim whitespace
+  grep -v '^[[:space:]]*$' "$package_list" | grep -v '^[[:space:]]*#' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' > "$temp_file"
+  
+  echo "$temp_file"
+}
+
+# Function to install packages with retry
+install_packages() {
+  local package_list="$1"
+  local repo_type="$2"
+  local max_retries=3
+  local retry_count=0
+  
+  # Clean the package list first
+  local clean_list=$(clean_package_list "$package_list")
+  
+  # Check if there are any packages to install
+  if [[ ! -s "$clean_list" ]]; then
+    log "⚠️  [$repo_type] No valid packages found in $package_list"
+    rm -f "$clean_list"
+    return 0
+  fi
+  
+  while [[ $retry_count -lt $max_retries ]]; do
+    log "📦 [$repo_type] Installing from $package_list (attempt $((retry_count + 1))/$max_retries)..."
+    
+    if [[ "$repo_type" == "official" ]]; then
+      resolve_conflicts "$clean_list"
+      if sudo pacman -Sy --needed --noconfirm - < "$clean_list" 2>&1 | tee -a "$LOG_FILE"; then
+        log "✅ [$repo_type] Successfully installed packages from $package_list"
+        rm -f "$clean_list"
+        return 0
+      fi
+    else
+      if $AUR_HELPER -S --needed --asexplicit --noconfirm - < "$clean_list" 2>&1 | tee -a "$LOG_FILE"; then
+        log "✅ [$repo_type] Successfully installed packages from $package_list"
+        rm -f "$clean_list"
+        return 0
+      fi
+    fi
+    
+    retry_count=$((retry_count + 1))
+    if [[ $retry_count -lt $max_retries ]]; then
+      log "⏳ Retrying in 5 seconds..."
+      sleep 5
+    fi
+  done
+  
+  log "❌ [$repo_type] Failed to install packages from $package_list after $max_retries attempts"
+  rm -f "$clean_list"
+  return 1
+}
+
+log "🚀 Starting package installation for host '$HOST'"
+log "📝 Log file: $LOG_FILE"
 
 if [[ ! -d $GROUP ]]; then
-  echo "❌  No package list for host '$HOST' (expected $GROUP)" >&2
+  log "❌ No package list for host '$HOST' (expected $GROUP)"
   exit 1
 fi
 
 # define your AUR helper or bail
 if command -v paru &> /dev/null; then
   AUR_HELPER=paru
+  log "🔧 Using paru as AUR helper"
 elif command -v yay &> /dev/null; then
   AUR_HELPER=yay
+  log "🔧 Using yay as AUR helper"
 else
-  echo "❌  No AUR helper found (paru or yay). Install one first." >&2
+  log "❌ No AUR helper found (paru or yay). Install one first."
   exit 1
 fi
 
-for file in "$GROUP"/*; do
-  echo "📦 [official] Installing from $file…"
-  # installs only from the official repos, skips AUR errors
-  sudo pacman -Sy --needed --noconfirm - < "$file" || true
+# Track installation results
+failed_files=()
+successful_files=()
 
-  echo "📦 [AUR] Installing from $file…"
-  $AUR_HELPER -S --needed --asexplicit --noconfirm - < "$file"
+for file in "$GROUP"/*; do
+  log "📁 Processing package list: $file"
+  
+  # Install from official repos
+  if install_packages "$file" "official"; then
+    successful_files+=("$file (official)")
+  else
+    failed_files+=("$file (official)")
+    log "⚠️  Continuing with AUR packages despite official repo failures..."
+  fi
+
+  # Install from AUR
+  if install_packages "$file" "AUR"; then
+    successful_files+=("$file (AUR)")
+  else
+    failed_files+=("$file (AUR)")
+  fi
 done
+
+# Summary report
+log "📊 Installation Summary:"
+log "✅ Successful: ${#successful_files[@]} package lists"
+for file in "${successful_files[@]}"; do
+  log "  ✓ $file"
+done
+
+if [[ ${#failed_files[@]} -gt 0 ]]; then
+  log "❌ Failed: ${#failed_files[@]} package lists"
+  for file in "${failed_files[@]}"; do
+    log "  ✗ $file"
+  done
+  log "📝 Check the log file for details: $LOG_FILE"
+  exit 1
+else
+  log "🎉 All packages installed successfully!"
+  log "📝 Full log available at: $LOG_FILE"
+fi

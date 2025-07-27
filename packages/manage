@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Package Management Workflow Script
+# Provides a unified interface for package management operations
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export HOST=$(hostnamectl --static 2>/dev/null || cat /proc/sys/kernel/hostname)
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Logging function
+log() {
+    echo -e "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+# Show usage
+show_usage() {
+    echo "Package Management Workflow"
+    echo ""
+    echo "Usage: $0 [COMMAND]"
+    echo ""
+    echo "Commands:"
+    echo "  install    Install packages from group files"
+    echo "  analyze    Analyze installed packages and organize them"
+    echo "  clean      Remove orphaned packages and clean cache"
+    echo "  status     Show current package management status"
+    echo "  validate   Validate package files for errors"
+    echo "  backup     Backup current package lists"
+    echo "  help       Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0 install    # Install all packages for current host"
+    echo "  $0 analyze    # Analyze and organize installed packages"
+    echo "  $0 status     # Show package management status"
+}
+
+# Validate package files
+validate_files() {
+    log "🔍 Validating package files..."
+    
+    local group_dir="$SCRIPT_DIR/group/$HOST"
+    local errors=0
+    
+    if [[ ! -d "$group_dir" ]]; then
+        log "${RED}❌ Group directory not found: $group_dir${NC}"
+        return 1
+    fi
+    
+    for file in "$group_dir"/*; do
+        if [[ -f "$file" ]]; then
+            local filename=$(basename "$file")
+            log "📁 Checking $filename..."
+            
+            # Check for empty lines
+            if grep -q '^[[:space:]]*$' "$file"; then
+                log "${YELLOW}⚠️  Found empty lines in $filename${NC}"
+                ((errors++))
+            fi
+            
+            # Check for comments or invalid entries
+            if grep -q '^[[:space:]]*#' "$file"; then
+                log "${BLUE}ℹ️  Found comments in $filename (will be ignored during install)${NC}"
+            fi
+            
+            # Count valid packages
+            local valid_packages=$(grep -v '^[[:space:]]*$' "$file" | grep -v '^[[:space:]]*#' | wc -l)
+            log "  📦 $valid_packages valid packages"
+        fi
+    done
+    
+    if [[ $errors -eq 0 ]]; then
+        log "${GREEN}✅ All package files are valid${NC}"
+        return 0
+    else
+        log "${YELLOW}⚠️  Found $errors validation issues${NC}"
+        return 1
+    fi
+}
+
+# Show status
+show_status() {
+    log "📊 Package Management Status for host '$HOST'"
+    echo ""
+    
+    local group_dir="$SCRIPT_DIR/group/$HOST"
+    
+    if [[ ! -d "$group_dir" ]]; then
+        log "${RED}❌ No package configuration found for host '$HOST'${NC}"
+        log "Run '$0 analyze' to set up package management"
+        return 1
+    fi
+    
+    # Show group files
+    log "📁 Package Groups:"
+    for file in "$group_dir"/*; do
+        if [[ -f "$file" ]]; then
+            local filename=$(basename "$file")
+            local count=$(grep -v '^[[:space:]]*$' "$file" | grep -v '^[[:space:]]*#' | wc -l)
+            log "  $filename: $count packages"
+        fi
+    done
+    
+    echo ""
+    
+    # Show installed vs managed packages
+    local total_explicit=$(pacman -Qe | wc -l)
+    local total_managed=0
+    
+    for file in "$group_dir"/*; do
+        if [[ -f "$file" ]]; then
+            local count=$(grep -v '^[[:space:]]*$' "$file" | grep -v '^[[:space:]]*#' | wc -l)
+            ((total_managed += count))
+        fi
+    done
+    
+    log "📦 Package Summary:"
+    log "  Explicitly installed: $total_explicit"
+    log "  Managed in groups: $total_managed"
+    
+    if [[ $total_managed -lt $total_explicit ]]; then
+        local unmanaged=$((total_explicit - total_managed))
+        log "${YELLOW}  Unmanaged packages: $unmanaged${NC}"
+        log "  Run '$0 analyze' to organize unmanaged packages"
+    else
+        log "${GREEN}  All packages are managed${NC}"
+    fi
+    
+    # Check for orphaned packages
+    local orphaned=$(pacman -Qtdq 2>/dev/null | wc -l || echo 0)
+    if [[ $orphaned -gt 0 ]]; then
+        log "${YELLOW}  Orphaned packages: $orphaned${NC}"
+        log "  Run '$0 clean' to remove orphaned packages"
+    fi
+}
+
+# Backup package lists
+backup_files() {
+    local backup_dir="$SCRIPT_DIR/backups"
+    local backup_name="backup-$(date +%Y%m%d-%H%M%S)"
+    local backup_path="$backup_dir/$backup_name"
+    
+    log "💾 Creating backup..."
+    
+    mkdir -p "$backup_path"
+    
+    # Backup group files
+    if [[ -d "$SCRIPT_DIR/group" ]]; then
+        cp -r "$SCRIPT_DIR/group" "$backup_path/"
+        log "✅ Backed up group files to $backup_path"
+    fi
+    
+    # Backup current package list
+    pacman -Qe > "$backup_path/current-packages.txt"
+    log "✅ Backed up current package list"
+    
+    # Create restore script
+    cat > "$backup_path/restore.sh" << 'EOF'
+#!/bin/bash
+# Restore script generated by package management system
+echo "This backup was created on $(date)"
+echo "To restore, copy the group files back to your package management directory"
+echo "Package list at time of backup is in current-packages.txt"
+EOF
+    chmod +x "$backup_path/restore.sh"
+    
+    log "📝 Backup completed: $backup_path"
+}
+
+# Main command handling
+case "${1:-help}" in
+    install)
+        log "🚀 Starting package installation..."
+        "$SCRIPT_DIR/install"
+        ;;
+    analyze)
+        log "🔍 Starting package analysis..."
+        "$SCRIPT_DIR/analyze"
+        ;;
+    clean)
+        log "🧹 Starting package cleanup..."
+        "$SCRIPT_DIR/clean"
+        ;;
+    status)
+        show_status
+        ;;
+    validate)
+        validate_files
+        ;;
+    backup)
+        backup_files
+        ;;
+    help|--help|-h)
+        show_usage
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo ""
+        show_usage
+        exit 1
+        ;;
+esac

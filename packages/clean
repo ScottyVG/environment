@@ -1,3 +1,69 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-sudo pacman -Qtdq | sudo pacman -Rns -
+LOG_FILE="/tmp/package-clean-$(date +%Y%m%d-%H%M%S).log"
+
+# Logging function
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
+}
+
+log "🧹 Starting package cleanup"
+log "📝 Log file: $LOG_FILE"
+
+# Find orphaned packages
+orphaned=$(pacman -Qtdq 2>/dev/null || true)
+
+if [[ -z "$orphaned" ]]; then
+    log "✅ No orphaned packages found. System is clean!"
+    exit 0
+fi
+
+orphaned_count=$(echo "$orphaned" | wc -l)
+log "🗑️  Found $orphaned_count orphaned packages:"
+
+# Show orphaned packages with details
+echo "$orphaned" | while read -r pkg; do
+    if [[ -n "$pkg" ]]; then
+        size=$(pacman -Qi "$pkg" 2>/dev/null | grep '^Installed Size' | cut -d: -f2- | sed 's/^ *//' || echo "Unknown")
+        echo "  📦 $pkg ($size)"
+    fi
+done
+
+echo ""
+read -p "🗑️  Remove all orphaned packages? [y/N]: " confirm
+
+case $confirm in
+    [Yy]*)
+        log "🗑️  Removing orphaned packages..."
+        if echo "$orphaned" | sudo pacman -Rns - 2>&1 | tee -a "$LOG_FILE"; then
+            log "✅ Successfully removed orphaned packages"
+        else
+            log "❌ Failed to remove some orphaned packages"
+            exit 1
+        fi
+        ;;
+    *)
+        log "⏭️  Cleanup cancelled by user"
+        ;;
+esac
+
+# Clean package cache
+echo ""
+read -p "🧹 Clean package cache? [y/N]: " clean_cache
+
+case $clean_cache in
+    [Yy]*)
+        log "🧹 Cleaning package cache..."
+        if sudo pacman -Sc --noconfirm 2>&1 | tee -a "$LOG_FILE"; then
+            log "✅ Package cache cleaned"
+        else
+            log "❌ Failed to clean package cache"
+        fi
+        ;;
+    *)
+        log "⏭️  Cache cleaning skipped"
+        ;;
+esac
+
+log "🎉 Cleanup completed. Log available at: $LOG_FILE"

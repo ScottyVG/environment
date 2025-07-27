@@ -48,7 +48,7 @@ sudo pacman -Syu zsh
 If you want the Oh My Zsh framework (and you already have a ~/.zshrc, skip the install-script step and just make sure you have ~/.oh-my-zsh in your home):
 
 ```bash
-sudo paru -S oh-my-zsh-git
+paru -S oh-my-zsh-git
 ```
 3. Try Zsh right now
 To drop into Zsh in your current session:
