@@ -50,4 +50,18 @@ return require('packer').startup(function(use)
 	  requires = { {'nvim-lua/plenary.nvim'} }
   })
 
+  -- EXPERIMENTAL
+  use {
+      'scottyvg/invisibilia-ai',
+        requires = {
+            'nvim-telescope/telescope.nvim',
+            'nvim-lua/plenary.nvim',
+  },
+  config = function()
+    require('invisibilia-ai').setup({
+      -- Your configuration here
+    })
+  end,
+}
+
 end)

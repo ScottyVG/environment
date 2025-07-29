@@ -15,3 +15,6 @@ window-decoration = none
 confirm-close-surface = false
 copy-on-select = clipboard
 mouse-shift-capture = false
+
+# Auto-start tmux
+command = tmux new-session -A -s main

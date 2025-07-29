@@ -12,8 +12,6 @@ less
 make
 neovim
 npm
-oh-my-zsh-git
-paru
 python
 ripgrep
 rsync
