@@ -18,8 +18,12 @@ vim.opt.backup = false
 vim.opt.undodir = os.getenv("HOME") .. "/.vim/undodir"
 vim.opt.undofile = true
 
+-- Enhanced search settings from TJ DeVries
 vim.opt.hlsearch = false -- no highlighting as I search
 vim.opt.incsearch = true
+vim.opt.smartcase = true -- case-insensitive unless uppercase used
+vim.opt.ignorecase = true -- case-insensitive search
+vim.opt.inccommand = "split" -- live substitution preview
 
 vim.opt.termguicolors = true -- good colors
 
@@ -30,3 +34,9 @@ vim.opt.isfname:append("@-@")
 vim.opt.updatetime = 50
 
 vim.opt.colorcolumn = "80"
+
+-- Additional useful settings from TJ DeVries
+vim.opt.splitbelow = true -- horizontal splits go below
+vim.opt.splitright = true -- vertical splits go right
+vim.opt.clipboard = "unnamedplus" -- use system clipboard
+vim.opt.formatoptions:remove("o") -- don't add comment on 'o' command

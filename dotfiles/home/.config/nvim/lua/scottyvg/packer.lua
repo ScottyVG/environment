@@ -26,11 +26,11 @@ return require('packer').startup(function(use)
   use('nvim-treesitter/nvim-treesitter', {run = ':TSUpdate'})
   use('nvim-treesitter/playground')
 
-  --use {
-	  --"ThePrimeagen/harpoon",
-	  --branch = "harpoon2",
-	  --requires = { {"nvim-lua/plenary.nvim"} }
-  --}
+  use {
+	  "ThePrimeagen/harpoon",
+	  branch = "harpoon2",
+	  requires = { {"nvim-lua/plenary.nvim"} }
+  }
 
   use('mbbill/undotree')
 
@@ -40,6 +40,8 @@ return require('packer').startup(function(use)
   use({'neovim/nvim-lspconfig'})
   use({'hrsh7th/nvim-cmp'})
   use({'hrsh7th/cmp-nvim-lsp'})
+  use({'hrsh7th/cmp-path'}) -- path completion
+  use({'hrsh7th/cmp-buffer'}) -- buffer completion
 
   use({'nvim-orgmode/orgmode', config = function()
             require('orgmode').setup{}
@@ -48,6 +50,28 @@ return require('packer').startup(function(use)
 
   use({ "folke/todo-comments.nvim",
 	  requires = { {'nvim-lua/plenary.nvim'} }
+  })
+
+  -- TJ's recommended development plugins
+  use({
+    "williamboman/mason.nvim", -- LSP server manager
+    "williamboman/mason-lspconfig.nvim", -- Mason + lspconfig integration
+    "WhoIsSethDaniel/mason-tool-installer.nvim", -- Auto-install tools
+  })
+
+  use({ "j-hui/fidget.nvim", tag = "legacy" }) -- LSP progress indicators
+
+  use({
+    "stevearc/conform.nvim", -- Better formatting
+  })
+
+  use({
+    "stevearc/oil.nvim", -- Edit directories like buffers
+    requires = { "nvim-tree/nvim-web-devicons" },
+  })
+
+  use({
+    "echasnovski/mini.nvim", -- Collection of useful mini plugins
   })
 
   -- EXPERIMENTAL

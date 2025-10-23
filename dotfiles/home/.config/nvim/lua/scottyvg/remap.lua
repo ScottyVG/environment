@@ -53,8 +53,26 @@ vim.keymap.set("n", "<leader><leader>", function()
     vim.cmd("so")
 end)
 
--- window navigation
-vim.keymap.set({"n", "v", "i"}, "<C-h>", "<C-w>h")
-vim.keymap.set({"n", "v", "i"}, "<C-j>", "<C-w>j")
-vim.keymap.set({"n", "v", "i"}, "<C-k>", "<C-w>k")
-vim.keymap.set({"n", "v", "i"}, "<C-l>", "<C-w>l")
+-- window navigation (TJ's approach - normal mode only for better compatibility)
+vim.keymap.set("n", "<C-h>", "<C-w><C-h>")
+vim.keymap.set("n", "<C-j>", "<C-w><C-j>")
+vim.keymap.set("n", "<C-k>", "<C-w><C-k>")
+vim.keymap.set("n", "<C-l>", "<C-w><C-l>")
+
+-- TJ's useful additions
+vim.keymap.set("n", "<leader>x", "<cmd>.lua<CR>", { desc = "Execute the current line" })
+vim.keymap.set("n", "<leader><leader>x", "<cmd>source %<CR>", { desc = "Execute the current file" })
+
+-- Toggle hlsearch if it's on, otherwise just do "enter"
+vim.keymap.set("n", "<CR>", function()
+  if vim.opt.hlsearch:get() then
+    vim.cmd.nohl()
+    return ""
+  else
+    return "<CR>"
+  end
+end, { expr = true, desc = "Clear search highlight or enter" })
+
+-- Enhanced diagnostic navigation
+vim.keymap.set("n", "]d", vim.diagnostic.goto_next, { desc = "Next diagnostic" })
+vim.keymap.set("n", "[d", vim.diagnostic.goto_prev, { desc = "Previous diagnostic" })
