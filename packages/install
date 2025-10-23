@@ -2,7 +2,25 @@
 set -euo pipefail
 shopt -s nullglob
 
-export HOST=$(hostnamectl --static)
+# Platform detection
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    export PLATFORM="macos"
+    export HOST=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
+    # Map macOS hostname to ship name (if not already a ship name)
+    case "$HOST" in
+        "Scotts-MacBook-Air-2") export HOST="voyager" ;;
+        "voyager"|"enterprise"|"intrepid"|"defiant"|"reliant") 
+            # Already a ship name, use as-is
+            export HOST="$HOST" ;;
+        *) 
+            # Clean up hostname for use as directory name
+            export HOST=$(echo "$HOST" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g') ;;
+    esac
+else
+    export PLATFORM="linux"
+    export HOST=$(hostnamectl --static)
+fi
+
 GROUP="./group/${HOST}"
 LOG_FILE="/tmp/package-install-$(date +%Y%m%d-%H%M%S).log"
 
@@ -103,7 +121,56 @@ install_packages() {
   return 1
 }
 
-log "🚀 Starting package installation for host '$HOST'"
+# Function to install Homebrew packages
+install_homebrew_packages() {
+  local package_list="$1"
+  local repo_type="$2"
+  local max_retries=3
+  local retry_count=0
+  
+  # Clean the package list first
+  local clean_list=$(clean_package_list "$package_list")
+  
+  # Check if there are any packages to install
+  if [[ ! -s "$clean_list" ]]; then
+    log "⚠️  [$repo_type] No valid packages found in $package_list"
+    rm -f "$clean_list"
+    return 0
+  fi
+  
+  while [[ $retry_count -lt $max_retries ]]; do
+    log "🍺 [$repo_type] Installing from $package_list (attempt $((retry_count + 1))/$max_retries)..."
+    
+    # Convert package list to space-separated arguments
+    local packages=$(tr '\n' ' ' < "$clean_list")
+    
+    if [[ "$repo_type" == "formula" ]]; then
+      if brew install $packages 2>&1 | tee -a "$LOG_FILE"; then
+        log "✅ [$repo_type] Successfully installed packages from $package_list"
+        rm -f "$clean_list"
+        return 0
+      fi
+    else
+      if brew install --cask $packages 2>&1 | tee -a "$LOG_FILE"; then
+        log "✅ [$repo_type] Successfully installed packages from $package_list"
+        rm -f "$clean_list"
+        return 0
+      fi
+    fi
+    
+    retry_count=$((retry_count + 1))
+    if [[ $retry_count -lt $max_retries ]]; then
+      log "⏳ Retrying in 5 seconds..."
+      sleep 5
+    fi
+  done
+  
+  log "❌ [$repo_type] Failed to install packages from $package_list after $max_retries attempts"
+  rm -f "$clean_list"
+  return 1
+}
+
+log "🚀 Starting package installation for host '$HOST' ($PLATFORM)"
 log "📝 Log file: $LOG_FILE"
 
 if [[ ! -d $GROUP ]]; then
@@ -111,16 +178,32 @@ if [[ ! -d $GROUP ]]; then
   exit 1
 fi
 
-# define your AUR helper or bail
-if command -v paru &> /dev/null; then
-  AUR_HELPER=paru
-  log "🔧 Using paru as AUR helper"
-elif command -v yay &> /dev/null; then
-  AUR_HELPER=yay
-  log "🔧 Using yay as AUR helper"
+# Platform-specific package manager setup
+if [[ "$PLATFORM" == "macos" ]]; then
+  if ! command -v brew &> /dev/null; then
+    log "❌ Homebrew not found. Installing Homebrew..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    
+    # Add Homebrew to PATH for current session
+    if [[ -f "/opt/homebrew/bin/brew" ]]; then
+      eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [[ -f "/usr/local/bin/brew" ]]; then
+      eval "$(/usr/local/bin/brew shellenv)"
+    fi
+  fi
+  log "🍺 Using Homebrew as package manager"
 else
-  log "❌ No AUR helper found (paru or yay). Install one first."
-  exit 1
+  # Linux: define your AUR helper or bail
+  if command -v paru &> /dev/null; then
+    AUR_HELPER=paru
+    log "🔧 Using paru as AUR helper"
+  elif command -v yay &> /dev/null; then
+    AUR_HELPER=yay
+    log "🔧 Using yay as AUR helper"
+  else
+    log "❌ No AUR helper found (paru or yay). Install one first."
+    exit 1
+  fi
 fi
 
 # Track installation results
@@ -130,19 +213,48 @@ successful_files=()
 for file in "$GROUP"/*; do
   log "📁 Processing package list: $file"
   
-  # Install from official repos
-  if install_packages "$file" "official"; then
-    successful_files+=("$file (official)")
+  if [[ "$PLATFORM" == "macos" ]]; then
+    # Install packages one by one, detecting if they're formulas or casks
+    local clean_list=$(clean_package_list "$file")
+    local package_success=true
+    
+    while IFS= read -r package; do
+      if [[ -n "$package" ]]; then
+        # Try as formula first
+        if brew install "$package" 2>&1 | tee -a "$LOG_FILE"; then
+          log "✅ [formula] Successfully installed $package"
+        # If formula fails, try as cask
+        elif brew install --cask "$package" 2>&1 | tee -a "$LOG_FILE"; then
+          log "✅ [cask] Successfully installed $package"
+        else
+          log "❌ Failed to install $package as either formula or cask"
+          package_success=false
+        fi
+      fi
+    done < "$clean_list"
+    
+    rm -f "$clean_list"
+    
+    if [[ "$package_success" == true ]]; then
+      successful_files+=("$file (mixed)")
+    else
+      failed_files+=("$file (mixed)")
+    fi
   else
-    failed_files+=("$file (official)")
-    log "⚠️  Continuing with AUR packages despite official repo failures..."
-  fi
+    # Linux: Install from official repos
+    if install_packages "$file" "official"; then
+      successful_files+=("$file (official)")
+    else
+      failed_files+=("$file (official)")
+      log "⚠️  Continuing with AUR packages despite official repo failures..."
+    fi
 
-  # Install from AUR
-  if install_packages "$file" "AUR"; then
-    successful_files+=("$file (AUR)")
-  else
-    failed_files+=("$file (AUR)")
+    # Install from AUR
+    if install_packages "$file" "AUR"; then
+      successful_files+=("$file (AUR)")
+    else
+      failed_files+=("$file (AUR)")
+    fi
   fi
 done
 

@@ -1,8 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Configuration
-export HOST=$(hostnamectl --static 2>/dev/null || cat /proc/sys/kernel/hostname)
+# Platform detection
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    export PLATFORM="macos"
+    export HOST=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
+    # Map macOS hostname to ship name (if not already a ship name)
+    case "$HOST" in
+        "Scotts-MacBook-Air-2") export HOST="voyager" ;;
+        "voyager"|"enterprise"|"intrepid"|"defiant"|"reliant") 
+            # Already a ship name, use as-is
+            export HOST="$HOST" ;;
+        *) 
+            # Clean up hostname for use as directory name
+            export HOST=$(echo "$HOST" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g') ;;
+    esac
+else
+    export PLATFORM="linux"
+    export HOST=$(hostnamectl --static 2>/dev/null || cat /proc/sys/kernel/hostname)
+fi
+
 GROUP_DIR="./group/$HOST"
 LOG_FILE="/tmp/package-analyze-$(date +%Y%m%d-%H%M%S).log"
 
@@ -12,8 +29,14 @@ log() {
 }
 
 # Get explicitly installed packages
-packages=$(pacman -Qe | awk '{print $1}')
-total_packages=$(echo "$packages" | wc -w)
+if [[ "$PLATFORM" == "macos" ]]; then
+    # Combine Homebrew formulas and casks
+    packages=$(brew list --formula 2>/dev/null; brew list --cask 2>/dev/null | sed 's/^/cask:/')
+    total_packages=$(echo "$packages" | grep -v '^$' | wc -l)
+else
+    packages=$(pacman -Qe | awk '{print $1}')
+    total_packages=$(echo "$packages" | wc -w)
+fi
 processed=0
 skipped=0
 removed=0
@@ -92,9 +115,25 @@ for pkg in $packages; do
     echo "📦 Package '$pkg' not found in any group file ($processed/$total_packages)"
     
     # Show package info
-    if pacman -Qi "$pkg" &>/dev/null; then
-        echo "📋 Description: $(pacman -Qi "$pkg" | grep '^Description' | cut -d: -f2- | sed 's/^ *//')"
-        echo "📏 Size: $(pacman -Qi "$pkg" | grep '^Installed Size' | cut -d: -f2- | sed 's/^ *//')"
+    if [[ "$PLATFORM" == "macos" ]]; then
+        # Remove cask: prefix for display and info lookup
+        display_pkg=$(echo "$pkg" | sed 's/^cask://')
+        if [[ "$pkg" == cask:* ]]; then
+            echo "📋 Type: Homebrew Cask"
+            if brew info --cask "$display_pkg" &>/dev/null; then
+                echo "📋 Description: $(brew info --cask "$display_pkg" 2>/dev/null | head -2 | tail -1)"
+            fi
+        else
+            echo "📋 Type: Homebrew Formula"
+            if brew info "$pkg" &>/dev/null; then
+                echo "📋 Description: $(brew info "$pkg" 2>/dev/null | head -2 | tail -1)"
+            fi
+        fi
+    else
+        if pacman -Qi "$pkg" &>/dev/null; then
+            echo "📋 Description: $(pacman -Qi "$pkg" | grep '^Description' | cut -d: -f2- | sed 's/^ *//')"
+            echo "📏 Size: $(pacman -Qi "$pkg" | grep '^Installed Size' | cut -d: -f2- | sed 's/^ *//')"
+        fi
     fi
     
     echo ""
@@ -122,12 +161,33 @@ for pkg in $packages; do
                 break
                 ;;
             2)
-                if sudo pacman -D --asdeps "$pkg" 2>/dev/null; then
-                    echo "🗑️  Marked '$pkg' as dependency"
-                    log "🗑️  Marked '$pkg' as dependency"
-                    ((removed++))
+                if [[ "$PLATFORM" == "macos" ]]; then
+                    display_pkg=$(echo "$pkg" | sed 's/^cask://')
+                    if [[ "$pkg" == cask:* ]]; then
+                        if brew uninstall --cask "$display_pkg" 2>/dev/null; then
+                            echo "🗑️  Removed cask '$display_pkg'"
+                            log "🗑️  Removed cask '$display_pkg'"
+                            ((removed++))
+                        else
+                            echo "❌ Failed to remove cask '$display_pkg'"
+                        fi
+                    else
+                        if brew uninstall "$pkg" 2>/dev/null; then
+                            echo "🗑️  Removed formula '$pkg'"
+                            log "🗑️  Removed formula '$pkg'"
+                            ((removed++))
+                        else
+                            echo "❌ Failed to remove formula '$pkg'"
+                        fi
+                    fi
                 else
-                    echo "❌ Failed to mark '$pkg' as dependency"
+                    if sudo pacman -D --asdeps "$pkg" 2>/dev/null; then
+                        echo "🗑️  Marked '$pkg' as dependency"
+                        log "🗑️  Marked '$pkg' as dependency"
+                        ((removed++))
+                    else
+                        echo "❌ Failed to mark '$pkg' as dependency"
+                    fi
                 fi
                 break
                 ;;

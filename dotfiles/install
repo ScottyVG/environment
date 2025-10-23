@@ -1,3 +1,80 @@
 #!/bin/bash
 
-stow -R -v -t ~ -d ~/dev/environment/dotfiles/home .
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+echo "🔗 Installing dotfiles using GNU Stow..."
+
+# Get the script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DOTFILES_HOME="$SCRIPT_DIR/home"
+
+# Check for conflicts and offer to adopt them
+if stow -n -v -t ~ -d "$DOTFILES_HOME" . 2>&1 | grep -q "would cause conflicts"; then
+    echo -e "${YELLOW}⚠️  Conflicts detected with existing files.${NC}"
+    echo "The following options are available:"
+    echo "1. Adopt existing files (move them into the dotfiles repo and create symlinks)"
+    echo "2. Backup existing files and install fresh symlinks"
+    echo "3. Skip installation"
+    echo ""
+    read -p "Choose an option (1/2/3): " choice
+    
+    case $choice in
+        1)
+            echo -e "${YELLOW}📁 Adopting existing files...${NC}"
+            if stow --adopt -v -t ~ -d "$DOTFILES_HOME" .; then
+                echo -e "${GREEN}✅ Files adopted successfully!${NC}"
+                echo -e "${YELLOW}ℹ️  Your existing files have been moved into the dotfiles repo.${NC}"
+                echo "You may want to review and commit these changes."
+            else
+                echo -e "${RED}❌ Failed to adopt files${NC}"
+                exit 1
+            fi
+            ;;
+        2)
+            echo -e "${YELLOW}💾 Backing up existing files...${NC}"
+            backup_dir="$HOME/.dotfiles-backup-$(date +%Y%m%d-%H%M%S)"
+            mkdir -p "$backup_dir"
+            
+            # Find conflicting files and back them up
+            stow -n -v -t ~ -d "$DOTFILES_HOME" . 2>&1 | grep "over existing target" | \
+            sed 's/.*over existing target \([^ ]*\) since.*/\1/' | \
+            while read -r target_file; do
+                if [[ -n "$target_file" && -f "$HOME/$target_file" ]]; then
+                    mkdir -p "$backup_dir/$(dirname "$target_file")"
+                    mv "$HOME/$target_file" "$backup_dir/$target_file"
+                    echo "  Backed up: $target_file"
+                fi
+            done
+            
+            echo -e "${GREEN}✅ Backup completed: $backup_dir${NC}"
+            echo -e "${YELLOW}🔗 Installing fresh symlinks...${NC}"
+            
+            if stow -v -t ~ -d "$DOTFILES_HOME" .; then
+                echo -e "${GREEN}✅ Dotfiles installed successfully!${NC}"
+            else
+                echo -e "${RED}❌ Failed to install dotfiles${NC}"
+                exit 1
+            fi
+            ;;
+        3)
+            echo -e "${YELLOW}⏭️  Installation skipped${NC}"
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}❌ Invalid choice${NC}"
+            exit 1
+            ;;
+    esac
+else
+    # No conflicts, proceed normally
+    if stow -v -t ~ -d "$DOTFILES_HOME" .; then
+        echo -e "${GREEN}✅ Dotfiles installed successfully!${NC}"
+    else
+        echo -e "${RED}❌ Failed to install dotfiles${NC}"
+        exit 1
+    fi
+fi

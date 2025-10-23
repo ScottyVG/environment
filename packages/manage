@@ -5,7 +5,25 @@ set -euo pipefail
 # Provides a unified interface for package management operations
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export HOST=$(hostnamectl --static 2>/dev/null || cat /proc/sys/kernel/hostname)
+
+# Platform detection
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    export PLATFORM="macos"
+    export HOST=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
+    # Map macOS hostname to ship name (if not already a ship name)
+    case "$HOST" in
+        "Scotts-MacBook-Air-2") export HOST="voyager" ;;
+        "voyager"|"enterprise"|"intrepid"|"defiant"|"reliant") 
+            # Already a ship name, use as-is
+            export HOST="$HOST" ;;
+        *) 
+            # Clean up hostname for use as directory name
+            export HOST=$(echo "$HOST" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g') ;;
+    esac
+else
+    export PLATFORM="linux"
+    export HOST=$(hostnamectl --static 2>/dev/null || cat /proc/sys/kernel/hostname)
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -109,9 +127,15 @@ show_status() {
     echo ""
     
     # Show installed vs managed packages
-    local total_explicit=$(pacman -Qe | wc -l)
-    local total_managed=0
+    local total_explicit
+    if [[ "$PLATFORM" == "macos" ]]; then
+        total_explicit=$(brew list --formula 2>/dev/null | wc -l)
+        total_explicit=$((total_explicit + $(brew list --cask 2>/dev/null | wc -l)))
+    else
+        total_explicit=$(pacman -Qe | wc -l)
+    fi
     
+    local total_managed=0
     for file in "$group_dir"/*; do
         if [[ -f "$file" ]]; then
             local count=$(grep -v '^[[:space:]]*$' "$file" | grep -v '^[[:space:]]*#' | wc -l)
@@ -119,7 +143,7 @@ show_status() {
         fi
     done
     
-    log "📦 Package Summary:"
+    log "📦 Package Summary ($PLATFORM):"
     log "  Explicitly installed: $total_explicit"
     log "  Managed in groups: $total_managed"
     
@@ -132,10 +156,17 @@ show_status() {
     fi
     
     # Check for orphaned packages
-    local orphaned=$(pacman -Qtdq 2>/dev/null | wc -l || echo 0)
-    if [[ $orphaned -gt 0 ]]; then
-        log "${YELLOW}  Orphaned packages: $orphaned${NC}"
-        log "  Run '$0 clean' to remove orphaned packages"
+    if [[ "$PLATFORM" == "macos" ]]; then
+        local orphaned=$(brew list --formula 2>/dev/null | wc -l || echo 0)
+        if [[ $orphaned -gt 0 ]]; then
+            log "${BLUE}ℹ️  Use 'brew autoremove' to clean unused dependencies${NC}"
+        fi
+    else
+        local orphaned=$(pacman -Qtdq 2>/dev/null | wc -l || echo 0)
+        if [[ $orphaned -gt 0 ]]; then
+            log "${YELLOW}  Orphaned packages: $orphaned${NC}"
+            log "  Run '$0 clean' to remove orphaned packages"
+        fi
     fi
 }
 
@@ -156,8 +187,14 @@ backup_files() {
     fi
     
     # Backup current package list
-    pacman -Qe > "$backup_path/current-packages.txt"
-    log "✅ Backed up current package list"
+    if [[ "$PLATFORM" == "macos" ]]; then
+        brew list --formula > "$backup_path/current-packages-formula.txt" 2>/dev/null || touch "$backup_path/current-packages-formula.txt"
+        brew list --cask > "$backup_path/current-packages-cask.txt" 2>/dev/null || touch "$backup_path/current-packages-cask.txt"
+        log "✅ Backed up current Homebrew package lists"
+    else
+        pacman -Qe > "$backup_path/current-packages.txt"
+        log "✅ Backed up current package list"
+    fi
     
     # Create restore script
     cat > "$backup_path/restore.sh" << 'EOF'
